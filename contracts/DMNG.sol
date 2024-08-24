@@ -58,13 +58,13 @@ contract DMNGToken is ERC20, Ownable {
     );
 
     constructor(
+        uint256 _initialSupply,
         uint256 _softCap,
         uint256 _hardCap,
-        address _usdtContract,
-        uint8 _customDecimals,
-        uint256 _initialSupply,
-        address _initialOwner,
         uint256 _campaignEndTime,
+        uint8 _customDecimals,
+        address _usdtContract,
+        address _initialOwner,
         address _admin
     ) Ownable(_initialOwner) ERC20("DMNG Token", "DMNG") {
         require(block.timestamp < _campaignEndTime, "Campaign end time must be in the future");
@@ -118,7 +118,7 @@ contract DMNGToken is ERC20, Ownable {
             "Insufficient allowance or balance"
         );
 
-        uint256 tokensToPurchase = _tokenValue / baseTokenPrice;
+        uint256 tokensToPurchase = (_tokenValue / baseTokenPrice)* 10 ** customDecimals;
 
         // Checking contract has enough DMNG tokens
         require(
@@ -137,7 +137,8 @@ contract DMNGToken is ERC20, Ownable {
         _transfer(address(this), msg.sender, tokensToPurchase);
 
         // Check if soft cap is reached
-        if (totalSupply() - currentSupply >= softCap) {
+        uint256 cap = totalSupply() - softCap;
+        if (currentSupply == cap) {
             campaignCompleted = true;
         }
 
@@ -159,7 +160,7 @@ contract DMNGToken is ERC20, Ownable {
             "Insufficient balance"
         );
 
-        uint256 tokens = _tokenValue * baseTokenPrice;
+        uint256 tokens = (_tokenValue * baseTokenPrice) / 10**usdtContract.decimals();
         require(profitPool >= tokens, "Pool needs to be balanced to withdraw");
 
         balances[msg.sender] -= _tokenValue;
@@ -201,7 +202,7 @@ contract DMNGToken is ERC20, Ownable {
         profitPool += _profitAmount;
 
         uint256 newTokenValue = calculateNewTokenValue(_profitAmount);
-        baseTokenPrice += newTokenValue * (10**usdtContract.decimals());
+        baseTokenPrice =  baseTokenPrice + newTokenValue * (10**usdtContract.decimals());
 
         emit BaseTokenPriceUpdated(baseTokenPrice);
         emit ProfitAdded(msg.sender, _profitAmount, block.timestamp);
