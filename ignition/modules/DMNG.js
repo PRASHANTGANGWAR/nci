@@ -32,13 +32,13 @@ module.exports = buildModule("DMNGModule", (m) => {
   const admin = m.getParameter("admin", process.env.ADMIN);
 
   const dmng = m.contract("DMNGToken", [
+    initialSupply,
     softCap,
     hardCap,
-    usdtContract,
-    customDecimals,
-    initialSupply,
-    initialOwner,
     campaignEndTime,
+    customDecimals,
+    usdtContract,
+    initialOwner,
     admin,
   ]);
 
