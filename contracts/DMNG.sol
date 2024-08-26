@@ -25,7 +25,6 @@ contract DMNGToken is ERC20, Ownable {
 
     // mappings
     mapping(address => bool) public admin;
-    mapping(address => uint256) public balances;
 
     // events
     event TokensPurchased(
@@ -61,13 +60,14 @@ contract DMNGToken is ERC20, Ownable {
         uint256 _initialSupply,
         uint256 _softCap,
         uint256 _hardCap,
-        uint256 _campaignEndTime,
+        uint256 _campaignDurationInDays,
         uint8 _customDecimals,
         address _usdtContract,
         address _initialOwner,
         address _admin
     ) Ownable(_initialOwner) ERC20("DMNG Token", "DMNG") {
-        require(block.timestamp < _campaignEndTime, "Campaign end time must be in the future");
+        require(_campaignDurationInDays > 0, "Campaign duration must be greater than zero");
+        require(_softCap < _hardCap, "Soft cap must be less than hard cap");
         _mint(address(this), _initialSupply * (10**_customDecimals));
         currentSupply = _initialSupply * (10**_customDecimals);
         softCap = _softCap * (10**_customDecimals);
@@ -77,8 +77,8 @@ contract DMNGToken is ERC20, Ownable {
         baseTokenPrice = 5 * (10**IERC20Extended(_usdtContract).decimals());
         customDecimals = _customDecimals;
         campaignStartTime = block.timestamp;
-        campaignEndTime =  _campaignEndTime;
-        admin[_admin];
+        campaignEndTime = block.timestamp + (_campaignDurationInDays * 1 days); // Campaign end time based on the duration
+        admin[_admin] = true;
     }
 
     modifier onlyDuringCampaign() {
@@ -100,14 +100,13 @@ contract DMNGToken is ERC20, Ownable {
         _;
     }
 
-   modifier onlyAdminOrOwner() {
-        require( admin[msg.sender] || msg.sender == owner(), "Not authorized");
+    modifier onlyAdminOrOwner() {
+        require(admin[msg.sender] || msg.sender == owner(), "Not authorized");
         _;
     }
+
     function buyTokens(uint256 _tokenValue) 
         external 
-        // onlyDuringCampaign 
-        // campaignIncomplete 
     {
         require(_tokenValue > 0, "Amount must be greater than zero");
 
@@ -118,7 +117,7 @@ contract DMNGToken is ERC20, Ownable {
             "Insufficient allowance or balance"
         );
 
-        uint256 tokensToPurchase = (_tokenValue / baseTokenPrice)* 10 ** customDecimals;
+        uint256 tokensToPurchase = (_tokenValue / baseTokenPrice) * 10 ** customDecimals;
 
         // Checking contract has enough DMNG tokens
         require(
@@ -130,7 +129,6 @@ contract DMNGToken is ERC20, Ownable {
         usdtContract.safeTransferFrom(msg.sender, address(this), _tokenValue);
         investorPool += _tokenValue;
 
-        balances[msg.sender] += tokensToPurchase;
         currentSupply -= tokensToPurchase;
 
         // Transfer DMNG tokens to investor wallet
@@ -156,19 +154,21 @@ contract DMNGToken is ERC20, Ownable {
         campaignCompletedOnly 
     {
         require(
-            _tokenValue > 0 && balances[msg.sender] >= _tokenValue,
+            _tokenValue > 0 && balanceOf(msg.sender) >= _tokenValue,
             "Insufficient balance"
         );
 
         uint256 tokens = (_tokenValue * baseTokenPrice) / 10**usdtContract.decimals();
         require(profitPool >= tokens, "Pool needs to be balanced to withdraw");
 
-        balances[msg.sender] -= _tokenValue;
+        // Transfer DMNG back to the investor
+        _transfer(msg.sender, address(this), _tokenValue);
 
         // Transfer USDT back to the investor
         usdtContract.safeTransfer(msg.sender, tokens);
 
         profitPool -= tokens;
+        currentSupply += _tokenValue;
 
         emit WithdrawnInvestor(
             msg.sender,
@@ -180,6 +180,7 @@ contract DMNGToken is ERC20, Ownable {
 
     function withdrawAdminOwner(uint256 _tokenValue) 
         external 
+        onlyAdminOrOwner
         campaignCompletedOnly 
     {
         require(investorPool >= _tokenValue, "Insufficient liquidity in pool");
@@ -192,17 +193,17 @@ contract DMNGToken is ERC20, Ownable {
 
     function addProfit(uint256 _profitAmount) 
         external 
-        onlyOwner 
+        onlyAdminOrOwner 
         campaignCompletedOnly 
     {
-        require(_profitAmount > 0, "Amount must be greater than zero");
+        require(_profitAmount > 0 && currentSupply > 0, "Profit amount and current supply must both be greater than zero.");
 
         // Transfer USDT from admin to contract
         usdtContract.safeTransferFrom(msg.sender, address(this), _profitAmount);
         profitPool += _profitAmount;
 
         uint256 newTokenValue = calculateNewTokenValue(_profitAmount);
-        baseTokenPrice =  baseTokenPrice + newTokenValue * (10**usdtContract.decimals());
+        baseTokenPrice = baseTokenPrice + newTokenValue * (10**usdtContract.decimals());
 
         emit BaseTokenPriceUpdated(baseTokenPrice);
         emit ProfitAdded(msg.sender, _profitAmount, block.timestamp);
@@ -226,11 +227,11 @@ contract DMNGToken is ERC20, Ownable {
         return customDecimals;
     }
 
-      function updateSubAdmin(address _admin, bool _value)
+    function updateAdmin(address _admin, bool _value)
         external
         onlyAdminOrOwner
     {
-        require( _admin!= address(0), "admin address cannot be zero address");
+        require(_admin != address(0), "Admin address cannot be zero address");
         admin[_admin] = _value;
         emit UpdateAdmin(_admin, _value);
     }
