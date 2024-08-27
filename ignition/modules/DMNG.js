@@ -2,7 +2,15 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 require("dotenv").config({ path: __dirname + "/.env" });
 
 module.exports = buildModule("DMNGModule", (m) => {
-  
+  const tokenName = m.getParameter(
+    "tokenName",
+    process.env.TOKEN_NAME
+  );
+  const tokenSymbol = m.getParameter(
+    "tokenSymbol",
+    process.env.TOKEN_SYMBOL
+  );
+
   const initialSupply = m.getParameter(
     "initialSupply",
     +process.env.INITIAL_SUPPLY
@@ -32,6 +40,8 @@ module.exports = buildModule("DMNGModule", (m) => {
   const admin = m.getParameter("admin", process.env.ADMIN);
 
   const dmng = m.contract("DMNGToken", [
+    tokenName,
+    tokenSymbol,
     initialSupply,
     softCap,
     hardCap,
