@@ -9,19 +9,22 @@ import "./IERC20Extended.sol";
 contract NCIContract is ERC20, Ownable {
     using SafeERC20 for IERC20Extended;
 
-    uint8 private customDecimals;
+    uint8 private decimal;
     uint256 public baseTokenPrice;
     uint256 public currentSupply;
     uint256 public softCap;
     uint256 public hardCap;
-    uint256 public investorPool;
+    uint256 public investorsPool;
     uint256 public profitPool;
     uint256 public campaignStartTime;
     uint256 public campaignEndTime;
     uint256 public totalRaised;
     uint256 public tokenInCirculation;
-    uint256 public percentage = 10;
-    bool public softCapReached;
+    uint256 public percentage = 100;
+    uint256 private pricePercetnage = 100;
+    bool private  PRICE_INCREASED_AFTER_CAP_REACHED;
+    bool public isSoftCapReached;
+    bool public withdrawEnableOrNot;
 
     IERC20Extended public liquidityTokenContract;
 
@@ -40,14 +43,14 @@ contract NCIContract is ERC20, Ownable {
         uint256 blockTimestamp
     );
     event BaseTokenPriceUpdated(uint256 newPrice);
-    event WithdrawnInvestor(
+    event InvestmentWithdrawl(
         address indexed investor,
         uint256 tokenAmount,
         uint256 liquidityTokenAmount,
         uint256 blockTimestamp,
         uint256 newProfitPool
     );
-    event WithdrawAdminOwner(
+    event WithdrawFund(
         address indexed ownerAdminAddress,
         uint256 tokenAmount,
         uint256 blockTimestamp
@@ -60,24 +63,25 @@ contract NCIContract is ERC20, Ownable {
     );
     event UpdateSoftCap(uint256 value);
     event SoftCapReachecd(bool value);
-    event CampaignEndTime(uint256 _campaignEndTime);
-    event ChangePercent(uint256 _percentage);
+    event CampaignEndTime(uint256 campaignEndTime);
+    event TokenValueIncreasePercentage(uint256 percentage);
+    event UpdateWithdrawlAccess(bool value);
 
     constructor(
-        string memory _tokenName,
+        string memory _name,
         string memory _symbol,
         uint256 _initialSupply,
         uint256 _softCap,
         uint256 _hardCap,
         uint256 _campaignEndTime,
-        uint8 _customDecimals,
+        uint8 _decimal,
         address _liquidityTokenContract,
         address _initialOwner,
         address _admin
-    ) Ownable(_initialOwner) ERC20(_tokenName, _symbol) {
+    ) Ownable(_initialOwner) ERC20(_name, _symbol) {
         require(
-            _campaignEndTime > 0,
-            "Campaign duration must be greater than zero"
+            _campaignEndTime > block.number,
+            "Campaign duration must be greater than current block number"
         );
         require(_softCap < _hardCap, "Soft cap must be less than hard cap");
 
@@ -87,27 +91,28 @@ contract NCIContract is ERC20, Ownable {
         softCap = _softCap;
         hardCap = _hardCap;
 
-        softCapReached = false;
+        isSoftCapReached = false;
         liquidityTokenContract = IERC20Extended(_liquidityTokenContract);
         baseTokenPrice =
             5 *
             (10**IERC20Extended(_liquidityTokenContract).decimals());
-        customDecimals = _customDecimals;
+        decimal = _decimal;
         campaignStartTime = block.number;
         campaignEndTime = _campaignEndTime;
         admin[_admin] = true;
+        withdrawEnableOrNot = false;
     }
 
     modifier campaignComplete() {
         require(
             block.number >= campaignEndTime,
-            "Campaign has not been completed"
+            "The campaign has not been completed."
         );
         _;
     }
 
-    modifier softCapReachedOnly() {
-        require(softCapReached, "Soft cap is not reached");
+    modifier isSoftCapReachedOnly() {
+        require(isSoftCapReached, "The soft cap has not been met.");
         _;
     }
 
@@ -117,15 +122,13 @@ contract NCIContract is ERC20, Ownable {
     }
 
     modifier onlyAdminOrOwner() {
-        require(admin[msg.sender] || msg.sender == owner(), "Not authorized");
+        require(admin[msg.sender] || msg.sender == owner(), "Unauthorized");
         _;
     }
 
 
-    modifier withdrawEnabledOrNot() {
-        if (block.number > campaignEndTime) {
-            require(!softCapReached, "Withdraw is disabled");
-        }
+     modifier withdrawEnabledOrNot() {
+            require(withdrawEnableOrNot, "Withdrawals are disabled.");
         _;
     }
 
@@ -141,16 +144,23 @@ contract NCIContract is ERC20, Ownable {
                 liquidityTokenContract.balanceOf(msg.sender) >= _tokenValue,
             "Insufficient allowance or balance"
         );
+        uint256 tokenPrice;
+        uint tokenValue = increseBaseTokenValue(isSoftCapReached);
+        if(tokenValue > 0){
+            tokenPrice = tokenValue;
+        }else {
+            tokenPrice = baseTokenPrice;
+        }
 
-        uint256 tokensToPurchase = (_tokenValue * 10**customDecimals) /
-            baseTokenPrice;
+        uint256 tokensToPurchase = (_tokenValue * 10**decimal) /
+            tokenPrice;
          require(
             tokensToPurchase <= hardCap,
             "Purchase denied. The requested amount exceeds the available tokens in the pool. Please try with a lower amount."
         );
         require(
             balanceOf(address(this)) >= tokensToPurchase,
-            "Not enough tokens available"
+            "Not enough tokens available in pool. Please try with a different amount."
         );
 
         liquidityTokenContract.safeTransferFrom(
@@ -158,16 +168,17 @@ contract NCIContract is ERC20, Ownable {
             address(this),
             _tokenValue
         );
-        investorPool += _tokenValue;
+        investorsPool += _tokenValue;
         currentSupply -= tokensToPurchase;
         totalRaised += tokensToPurchase;
         tokenInCirculation += tokensToPurchase;
 
         _transfer(address(this), msg.sender, tokensToPurchase);
-        if (!softCapReached && currentSupply <= totalSupply() - softCap) {
-            softCapReached = true;
+        if (!isSoftCapReached && currentSupply <= totalSupply() - softCap) {
+            isSoftCapReached = true;
             emit SoftCapReachecd(true);
         }
+
         emit TokensPurchased(
             msg.sender,
             _tokenValue,
@@ -183,7 +194,7 @@ contract NCIContract is ERC20, Ownable {
     function sellTokens(uint256 _tokenValue)
         external
         campaignComplete
-        softCapReachedOnly
+        isSoftCapReachedOnly
     {
         _withdraw(_tokenValue);
     }
@@ -192,14 +203,14 @@ contract NCIContract is ERC20, Ownable {
     function withdrawAdminOwner(uint256 _tokenValue)
         external
         onlyAdminOrOwner
-        softCapReachedOnly
+        isSoftCapReachedOnly
     {
-        require(investorPool >= _tokenValue, "Insufficient liquidity in pool");
+        require(investorsPool >= _tokenValue, "Insufficient liquidity in pool");
 
         liquidityTokenContract.safeTransfer(msg.sender, _tokenValue);
-        investorPool -= _tokenValue;
+        investorsPool -= _tokenValue;
 
-        emit WithdrawAdminOwner(msg.sender, _tokenValue, block.timestamp);
+        emit WithdrawFund(msg.sender, _tokenValue, block.timestamp);
     }
 
 
@@ -219,14 +230,14 @@ contract NCIContract is ERC20, Ownable {
         liquidityTokenContract.safeTransfer(msg.sender, remainingToken);
         profitPool -= remainingToken;
 
-        emit WithdrawAdminOwner(msg.sender, remainingToken, block.timestamp);
+        emit WithdrawFund(msg.sender, remainingToken, block.timestamp);
     }
 
     // Add profits to the contract, updating the base token price
     function addProfit(uint256 _profitAmount)
         external
         onlyAdminOrOwner
-        softCapReachedOnly
+        isSoftCapReachedOnly
     {
         require(
             _profitAmount > 0 && tokenInCirculation > 0,
@@ -256,7 +267,7 @@ contract NCIContract is ERC20, Ownable {
     function addLiquidity(uint256 _tokenAmount)
         external
         onlyAdminOrOwner
-        softCapReachedOnly
+        isSoftCapReachedOnly
         campaignComplete
     {
         require(_tokenAmount > 0, "Amount must be greater than zero.");
@@ -295,8 +306,8 @@ contract NCIContract is ERC20, Ownable {
         );
 
         uint256 tokens = (_tokenValue * baseTokenPrice) /
-            10**liquidityTokenContract.decimals();
-        require(profitPool >= tokens, "Insufficient tokens in pool. Please try with an amount less than");
+            10 ** liquidityTokenContract.decimals();
+        require(profitPool >= tokens, "Insufficient tokens in pool. Please try with a different amount.");
 
         liquidityTokenContract.safeTransfer(msg.sender, tokens);
 
@@ -305,7 +316,7 @@ contract NCIContract is ERC20, Ownable {
         profitPool -= tokens;
         tokenInCirculation -= _tokenValue;
 
-        emit WithdrawnInvestor(
+        emit InvestmentWithdrawl(
             msg.sender,
             _tokenValue,
             tokens,
@@ -321,15 +332,16 @@ contract NCIContract is ERC20, Ownable {
     {
         uint256 newTokenPrice = ((_profitAmount * 10 ** liquidityTokenContract.decimals()) /
             (tokenInCirculation + currentSupply)) ; 
-        if(newTokenPrice >= _baseTokenPrice + _baseTokenPrice * percentage / 1000){
-            return _baseTokenPrice * percentage / 1000;
+        uint256 increment = (_baseTokenPrice * percentage) / 1000; 
+        if(newTokenPrice >=  increment ){
+            return increment;
         }
         return newTokenPrice;
     }
 
     // Override the decimals function to return custom decimals
     function decimals() public view virtual override returns (uint8) {
-        return customDecimals;
+        return decimal;
     }
 
     // Update admin status
@@ -345,10 +357,10 @@ contract NCIContract is ERC20, Ownable {
 
   // Update soft status
     function updateSoftCap(uint256 _value) external onlyAdminOrOwner {
-        require(!softCapReached, "Soft cap already reached");
+        require(!isSoftCapReached, "The soft cap has already been reached.");
         softCap = _value;
         if (currentSupply <= totalSupply() - _value) {
-            softCapReached = true;
+            isSoftCapReached = true;
             emit SoftCapReachecd(true);
         }
         emit UpdateSoftCap(_value);
@@ -356,15 +368,32 @@ contract NCIContract is ERC20, Ownable {
 
     //Update campaign end time
     function updateCampaignEndTime(uint256 _campaignEndTime) external onlyAdminOrOwner {
-        require(_campaignEndTime > block.number, "Please provide the end time greater than current block numnber");
+        require(_campaignEndTime > campaignStartTime, "End time must be greater than the start time");
         campaignEndTime = _campaignEndTime;
         emit CampaignEndTime(_campaignEndTime);
     }
 
+    // update percentage
     function updatePercentage(uint256 _percentage) external onlyAdminOrOwner {
         percentage = _percentage;
-        emit ChangePercent(_percentage);
+        emit TokenValueIncreasePercentage(_percentage);
     }
 
+    //enable or disable withdraw
+    function updateWithdrawEnableOrDisable(bool _value) external onlyAdminOrOwner{
+        withdrawEnableOrNot = _value;
+        emit UpdateWithdrawlAccess(_value);
+    }
+
+    function increseBaseTokenValue(bool _isSoftCapReached) internal returns(uint256) {
+        if(_isSoftCapReached && block.number > campaignEndTime && !PRICE_INCREASED_AFTER_CAP_REACHED){
+            uint256 increment = (baseTokenPrice * pricePercetnage) / 1000; 
+            baseTokenPrice += increment;
+            PRICE_INCREASED_AFTER_CAP_REACHED = true;
+            emit  BaseTokenPriceUpdated(baseTokenPrice);
+            return baseTokenPrice;
+        }
+        return 0;
+    }
 
 }

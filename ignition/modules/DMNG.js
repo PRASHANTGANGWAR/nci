@@ -23,9 +23,9 @@ module.exports = buildModule("DMNGModule", (m) => {
     "initialOwner",
     process.env.INITIAL_OWNER
   );
-  const usdtContract = m.getParameter(
-    "usdtContract",
-    process.env.USDT_CONTRACT
+  const ntzcContract = m.getParameter(
+    "ntzcContract",
+    process.env.NTZC_CONTRACT
   );
 
   const customDecimals = m.getParameter(
@@ -39,7 +39,7 @@ module.exports = buildModule("DMNGModule", (m) => {
 
   const admin = m.getParameter("admin", process.env.ADMIN);
 
-  const dmng = m.contract("DMNGToken", [
+  const dmng = m.contract("NCIContract", [
     tokenName,
     tokenSymbol,
     initialSupply,
@@ -47,7 +47,7 @@ module.exports = buildModule("DMNGModule", (m) => {
     hardCap,
     campaignEndTime,
     customDecimals,
-    usdtContract,
+    ntzcContract,
     initialOwner,
     admin,
   ]);
