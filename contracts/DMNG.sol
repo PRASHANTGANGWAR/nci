@@ -3,12 +3,18 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./IERC20Extended.sol";
 
 contract NCIContract is ERC20, Ownable {
     using SafeERC20 for IERC20Extended;
-
+    struct CampaignSettings {
+        uint256 softCap;
+        uint256 hardCap;
+        uint256 campaignEndTime;
+    }
     uint8 private decimal;
     uint256 public baseTokenPrice;
     uint256 public currentSupply;
@@ -22,6 +28,7 @@ contract NCIContract is ERC20, Ownable {
     uint256 public tokenInCirculation;
     uint256 public percentage = 100;
     uint256 private pricePercetnage = 100;
+    address public networkFeeWallet;
     bool private  PRICE_INCREASED_AFTER_CAP_REACHED;
     bool public isSoftCapReached;
     bool public withdrawEnableOrNot;
@@ -29,6 +36,8 @@ contract NCIContract is ERC20, Ownable {
     IERC20Extended public liquidityTokenContract;
 
     mapping(address => bool) public admin;
+    mapping(address => bool) public signer;
+    mapping(address => uint256) public nonces;
 
     event TokensPurchased(
         address indexed investor,
@@ -56,6 +65,7 @@ contract NCIContract is ERC20, Ownable {
         uint256 blockTimestamp
     );
     event UpdateAdmin(address indexed adminAddress, bool value);
+    event UpdateSigner(address indexed signerAddress, bool value);
     event AddLiquidity(
         address indexed ownerAdminAddress,
         uint256 tokenAmount,
@@ -71,25 +81,25 @@ contract NCIContract is ERC20, Ownable {
         string memory _name,
         string memory _symbol,
         uint256 _initialSupply,
-        uint256 _softCap,
-        uint256 _hardCap,
-        uint256 _campaignEndTime,
+        CampaignSettings memory _campaignSettings,
         uint8 _decimal,
         address _liquidityTokenContract,
         address _initialOwner,
-        address _admin
+        address _admin,
+        address _signer,
+        address _networkFeeWallet
     ) Ownable(_initialOwner) ERC20(_name, _symbol) {
         require(
-            _campaignEndTime > block.number,
+            _campaignSettings.campaignEndTime > block.number,
             "Campaign duration must be greater than current block number"
         );
-        require(_softCap < _hardCap, "Soft cap must be less than hard cap");
+        require(_campaignSettings.softCap < _campaignSettings.hardCap, "Soft cap must be less than hard cap");
 
         _mint(address(this), _initialSupply);
 
         currentSupply = _initialSupply;
-        softCap = _softCap;
-        hardCap = _hardCap;
+        softCap = _campaignSettings.softCap;
+        hardCap = _campaignSettings.hardCap;
 
         isSoftCapReached = false;
         liquidityTokenContract = IERC20Extended(_liquidityTokenContract);
@@ -98,9 +108,11 @@ contract NCIContract is ERC20, Ownable {
             (10**IERC20Extended(_liquidityTokenContract).decimals());
         decimal = _decimal;
         campaignStartTime = block.number;
-        campaignEndTime = _campaignEndTime;
+        campaignEndTime = _campaignSettings.campaignEndTime;
         admin[_admin] = true;
         withdrawEnableOrNot = false;
+        signer[_signer] = true;
+        networkFeeWallet = _networkFeeWallet;
     }
 
     modifier campaignComplete() {
@@ -127,95 +139,82 @@ contract NCIContract is ERC20, Ownable {
     }
 
 
-     modifier withdrawEnabledOrNot() {
+    modifier withdrawEnabledOrNot() {
             require(withdrawEnableOrNot, "Withdrawals are disabled.");
         _;
     }
 
+    modifier onlySigner() {
+            require(signer[msg.sender], "Only signer is allowed");
+        _;
+    }
+
     // Function to purchase tokens during the campaign
-    function buyTokens(uint256 _tokenValue)
+    function buyTokens(uint256 _tokenAmount)
         external
         hardCapNotReachedOnly
     {
-        require(_tokenValue > 0, "The amount must be greater than zero.");
-        require(
-            liquidityTokenContract.allowance(msg.sender, address(this)) >=
-                _tokenValue &&
-                liquidityTokenContract.balanceOf(msg.sender) >= _tokenValue,
-            "Insufficient allowance or balance"
-        );
-        uint256 tokenPrice;
-        uint tokenValue = increseBaseTokenValue(isSoftCapReached);
-        if(tokenValue > 0){
-            tokenPrice = tokenValue;
-        }else {
-            tokenPrice = baseTokenPrice;
-        }
-
-        uint256 tokensToPurchase = (_tokenValue * 10**decimal) /
-            tokenPrice;
-         require(
-            tokensToPurchase <= hardCap,
-            "Purchase denied. The requested amount exceeds the available tokens in the pool. Please try with a lower amount."
-        );
-        require(
-            balanceOf(address(this)) >= tokensToPurchase,
-            "Not enough tokens available in pool. Please try with a different amount."
-        );
-
-        liquidityTokenContract.safeTransferFrom(
-            msg.sender,
-            address(this),
-            _tokenValue
-        );
-        investorsPool += _tokenValue;
-        currentSupply -= tokensToPurchase;
-        totalRaised += tokensToPurchase;
-        tokenInCirculation += tokensToPurchase;
-
-        _transfer(address(this), msg.sender, tokensToPurchase);
-        if (!isSoftCapReached && currentSupply <= totalSupply() - softCap) {
-            isSoftCapReached = true;
-            emit SoftCapReachecd(true);
-        }
-
-        emit TokensPurchased(
-            msg.sender,
-            _tokenValue,
-            tokensToPurchase,
-            baseTokenPrice,
-            block.timestamp
-        );
-       
-    
+        _buyTokens(_tokenAmount, msg.sender);  
     }
 
+    //  Function to purchase tokens during the campaign with delegate functionality
+    function delegateBuyTokens(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce)
+        external
+        onlySigner
+        hardCapNotReachedOnly
+    {
+        require(_tokenAmount > _networkFee, "Token value should be greater than network fee");
+        _validateData(_signature,_investorAddress, _tokenAmount, _networkFee, _nonce);
+        uint256 remainingToken = _tokenAmount - _networkFee;
+        _buyTokens(remainingToken, _investorAddress);  
+        liquidityTokenContract.safeTransferFrom(
+            _investorAddress,
+            networkFeeWallet,
+            _networkFee
+        );
+        nonces[_investorAddress]++;
+
+    }
+    
     // Function to sell tokens after the campaign is completed
-    function sellTokens(uint256 _tokenValue)
+    function sellTokens(uint256 _tokenAmount)
         external
         campaignComplete
         isSoftCapReachedOnly
     {
-        _withdraw(_tokenValue);
+        _withdraw(_tokenAmount, msg.sender, false, 0);
     }
 
+    // Function to sell tokens after the campaign is completed
+    function delegateSellTokens(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce)
+        external
+        onlySigner
+        campaignComplete
+        isSoftCapReachedOnly
+    {
+        _validateData(_signature,_investorAddress, _tokenAmount, _networkFee, _nonce);
+        _withdraw(_tokenAmount, _investorAddress,  true, _networkFee);
+        nonces[_investorAddress]++;
+
+    }
+    
     // Admin or Owner withdraws funds in investor pool
-    function withdrawAdminOwner(uint256 _tokenValue)
+    function withdrawByAdminOrOwner(uint256 _tokenAmount)
         external
         onlyAdminOrOwner
         isSoftCapReachedOnly
     {
-        require(investorsPool >= _tokenValue, "Insufficient liquidity in pool");
+        require(investorsPool >= _tokenAmount, "Insufficient liquidity in pool");
 
-        liquidityTokenContract.safeTransfer(msg.sender, _tokenValue);
-        investorsPool -= _tokenValue;
+        liquidityTokenContract.safeTransfer(msg.sender, _tokenAmount);
+        investorsPool -= _tokenAmount;
 
-        emit WithdrawFund(msg.sender, _tokenValue, block.timestamp);
+        emit WithdrawFund(msg.sender, _tokenAmount, block.timestamp);
     }
 
 
     // Admin or Owner withdraws funds in profit pool
-    function withdrawInProfitPool() external onlyAdminOrOwner {
+    function withdrawFromProfitPool() external onlyAdminOrOwner {
         require(profitPool > 0, "Pool doesn't have enough balance");
 
         uint tokenValue = (tokenInCirculation * baseTokenPrice) / 10 ** liquidityTokenContract.decimals();
@@ -289,36 +288,43 @@ contract NCIContract is ERC20, Ownable {
     }
 
     // Withdraw funds for investors
-    function withdrawInvestment(uint256 _tokenValue)
+    function withdrawInvestment(uint256 _tokenAmount)
         external
         withdrawEnabledOrNot
     {
-        _withdraw(_tokenValue);
+        _withdraw(_tokenAmount, msg.sender, false, 0);
     }
 
     // Internal withdraw function
-    function _withdraw(uint256 _tokenValue) internal {
+    function _withdraw(uint256 _tokenAmount, address _investorAddress, bool _isDelegate, uint256 _networkFee) internal {
         require(profitPool > 0, "Please wait for the profit to be added to pool");
 
         require(
-            _tokenValue > 0 && balanceOf(msg.sender) >= _tokenValue,
+            _tokenAmount > 0 && balanceOf(_investorAddress) >= _tokenAmount,
             "Insufficient balance"
         );
 
-        uint256 tokens = (_tokenValue * baseTokenPrice) /
+        uint256 tokens = (_tokenAmount * baseTokenPrice) /
             10 ** liquidityTokenContract.decimals();
         require(profitPool >= tokens, "Insufficient tokens in pool. Please try with a different amount.");
-
-        liquidityTokenContract.safeTransfer(msg.sender, tokens);
+        if(_isDelegate){
+            tokens = tokens - _networkFee;
+            liquidityTokenContract.safeTransferFrom(
+            _investorAddress,
+            networkFeeWallet,
+            _networkFee
+            );
+        }
+        liquidityTokenContract.safeTransfer(_investorAddress, tokens);
 
         // burn dmng token
-        _burn(msg.sender, _tokenValue);
+        _burn(_investorAddress, _tokenAmount);
         profitPool -= tokens;
-        tokenInCirculation -= _tokenValue;
+        tokenInCirculation -= _tokenAmount;
 
         emit InvestmentWithdrawl(
-            msg.sender,
-            _tokenValue,
+            _investorAddress,
+            _tokenAmount,
             tokens,
             block.timestamp,
             profitPool
@@ -354,6 +360,15 @@ contract NCIContract is ERC20, Ownable {
         emit UpdateAdmin(_admin, _value);
     }
 
+   // Update admin status
+    function updateSigner(address _signer, bool _value)
+        external
+        onlyAdminOrOwner
+    {   
+        require(_signer != address(0), "Signer address cannot be zero address");
+        signer[_signer] = _value;
+        emit UpdateSigner(_signer, _value);
+    }
 
   // Update soft status
     function updateSoftCap(uint256 _value) external onlyAdminOrOwner {
@@ -393,7 +408,75 @@ contract NCIContract is ERC20, Ownable {
             emit  BaseTokenPriceUpdated(baseTokenPrice);
             return baseTokenPrice;
         }
-        return 0;
+        return baseTokenPrice;
     }
 
+    function _buyTokens(uint256 _tokenAmount, address _investorAddress) internal {
+        require(_tokenAmount > 0, "The amount must be greater than zero.");
+        require(
+            liquidityTokenContract.allowance(_investorAddress, address(this)) >=
+                _tokenAmount &&
+                liquidityTokenContract.balanceOf(_investorAddress) >= _tokenAmount,
+            "Insufficient allowance or balance"
+        );
+        uint tokenPrice = increseBaseTokenValue(isSoftCapReached);
+        uint256 tokensToPurchase = (_tokenAmount * 10 ** decimal) /
+            tokenPrice;
+         require(
+            tokensToPurchase <= hardCap,
+            "Purchase denied. The requested amount exceeds the available tokens in the pool. Please try with a lower amount."
+        );
+        require(
+            balanceOf(address(this)) >= tokensToPurchase,
+            "Not enough tokens available in pool. Please try with a different amount."
+        );
+
+        liquidityTokenContract.safeTransferFrom(
+            _investorAddress,
+            address(this),
+            _tokenAmount
+        );
+        investorsPool += _tokenAmount;
+        currentSupply -= tokensToPurchase;
+        totalRaised += tokensToPurchase;
+        tokenInCirculation += tokensToPurchase;
+
+        _transfer(address(this), _investorAddress, tokensToPurchase);
+        if (!isSoftCapReached && currentSupply <= totalSupply() - softCap) {
+            isSoftCapReached = true;
+            emit SoftCapReachecd(true);
+        }
+
+        emit TokensPurchased(
+            _investorAddress,
+            _tokenAmount,
+            tokensToPurchase,
+            baseTokenPrice,
+            block.timestamp
+        );
+    }
+
+    function _validateData(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce) internal view {
+        require(_nonce == nonces[_investorAddress], "Invalid nonce");
+        bytes32 message = keccak256(
+            abi.encode(
+                _investorAddress,
+                _tokenAmount,
+                baseTokenPrice,
+                _networkFee,
+                _nonce
+            )
+        );
+        address investorAddress = _validateInvestor(message, _signature);  
+        require(investorAddress == _investorAddress, "Invalid data");
+    }
+
+    function _validateInvestor(bytes32 _message, bytes memory signature)
+        internal 
+        pure
+        returns (address)
+    {
+        _message = MessageHashUtils.toEthSignedMessageHash(_message);
+        return ECDSA.recover(_message, signature);
+    }
 }
