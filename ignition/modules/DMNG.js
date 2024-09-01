@@ -38,18 +38,23 @@ module.exports = buildModule("DMNGModule", (m) => {
   );
 
   const admin = m.getParameter("admin", process.env.ADMIN);
+  const signer = m.getParameter("signer", process.env.SIGNER);
+  const networkFee = m.getParameter("networkFee", process.env.NETWORK_FEE);
+
 
   const dmng = m.contract("NCIContract", [
     tokenName,
     tokenSymbol,
     initialSupply,
-    softCap,
+    [softCap,
     hardCap,
-    campaignEndTime,
+    campaignEndTime],
     customDecimals,
     ntzcContract,
     initialOwner,
     admin,
+    signer,
+    networkFee
   ]);
 
   return { dmng };

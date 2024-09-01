@@ -10,12 +10,20 @@ import "./IERC20Extended.sol";
 
 contract NCIContract is ERC20, Ownable {
     using SafeERC20 for IERC20Extended;
+
+    // structs
     struct CampaignSettings {
         uint256 softCap;
         uint256 hardCap;
         uint256 campaignEndTime;
     }
+
+    // private variables
     uint8 private decimal;
+    uint256 private pricePercetnage = 100;
+    bool private  PRICE_INCREASED_AFTER_CAP_REACHED;
+
+    // public variables
     uint256 public baseTokenPrice;
     uint256 public currentSupply;
     uint256 public softCap;
@@ -27,18 +35,18 @@ contract NCIContract is ERC20, Ownable {
     uint256 public totalRaised;
     uint256 public tokenInCirculation;
     uint256 public percentage = 100;
-    uint256 private pricePercetnage = 100;
     address public networkFeeWallet;
-    bool private  PRICE_INCREASED_AFTER_CAP_REACHED;
     bool public isSoftCapReached;
     bool public withdrawEnableOrNot;
 
     IERC20Extended public liquidityTokenContract;
 
+    //mappings
     mapping(address => bool) public admin;
     mapping(address => bool) public signer;
     mapping(address => uint256) public nonces;
 
+    // events 
     event TokensPurchased(
         address indexed investor,
         uint256 liquidityTokenAmount,
@@ -95,11 +103,11 @@ contract NCIContract is ERC20, Ownable {
         );
         require(_campaignSettings.softCap < _campaignSettings.hardCap, "Soft cap must be less than hard cap");
 
-        _mint(address(this), _initialSupply);
+        _mint(address(this), _initialSupply * (10 **_decimal));
 
-        currentSupply = _initialSupply;
-        softCap = _campaignSettings.softCap;
-        hardCap = _campaignSettings.hardCap;
+        currentSupply = _initialSupply * (10 **_decimal);
+        softCap = _campaignSettings.softCap * (10 **_decimal);
+        hardCap = _campaignSettings.hardCap * (10 **_decimal);
 
         isSoftCapReached = false;
         liquidityTokenContract = IERC20Extended(_liquidityTokenContract);
@@ -115,9 +123,10 @@ contract NCIContract is ERC20, Ownable {
         networkFeeWallet = _networkFeeWallet;
     }
 
+    // modifiers
     modifier campaignComplete() {
         require(
-            block.number >= campaignEndTime,
+            block.number > campaignEndTime,
             "The campaign has not been completed."
         );
         _;
@@ -149,7 +158,8 @@ contract NCIContract is ERC20, Ownable {
         _;
     }
 
-    // Function to purchase tokens during the campaign
+    /// @notice Allows users to buy tokens if the hard cap is not reached.
+    /// @param _tokenAmount Amount of tokens to purchase.
     function buyTokens(uint256 _tokenAmount)
         external
         hardCapNotReachedOnly
@@ -157,7 +167,12 @@ contract NCIContract is ERC20, Ownable {
         _buyTokens(_tokenAmount, msg.sender);  
     }
 
-    //  Function to purchase tokens during the campaign with delegate functionality
+    /// @notice Allows a signer to buy tokens for an investor, deducting network fees.
+    /// @param _signature Signature for transaction validation.
+    /// @param _investorAddress Address of the token recipient.
+    /// @param _tokenAmount Total tokens to deposit.
+    /// @param _networkFee Fee deducted from the token amount.
+    /// @param _nonce Prevents replay attacks.
     function delegateBuyTokens(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce)
         external
         onlySigner
@@ -167,7 +182,9 @@ contract NCIContract is ERC20, Ownable {
         _validateData(_signature,_investorAddress, _tokenAmount, _networkFee, _nonce);
         uint256 remainingToken = _tokenAmount - _networkFee;
         _buyTokens(remainingToken, _investorAddress);  
-        liquidityTokenContract.safeTransferFrom(
+
+        SafeERC20.safeTransferFrom(
+            liquidityTokenContract,
             _investorAddress,
             networkFeeWallet,
             _networkFee
@@ -176,7 +193,10 @@ contract NCIContract is ERC20, Ownable {
 
     }
     
-    // Function to sell tokens after the campaign is completed
+    /// @notice Allows users to sell tokens after the campaign is complete and soft cap is reached.
+    /// @param _tokenAmount Amount of tokens to sell.
+    /// @dev The function checks that the campaign is complete and the soft cap has been reached.
+    /// @dev Internally calls `_withdraw` to handle the withdrawal logic.
     function sellTokens(uint256 _tokenAmount)
         external
         campaignComplete
@@ -185,7 +205,12 @@ contract NCIContract is ERC20, Ownable {
         _withdraw(_tokenAmount, msg.sender, false, 0);
     }
 
-    // Function to sell tokens after the campaign is completed
+    /// @notice Allows a signer to sell tokens for an investor, deducting network fees.
+    /// @param _signature Signature for validation.
+    /// @param _investorAddress Address of the token seller.
+    /// @param _tokenAmount Tokens to sell.
+    /// @param _networkFee Fee deducted from the amount.
+    /// @param _nonce Prevents replay attacks.
     function delegateSellTokens(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce)
         external
         onlySigner
@@ -198,7 +223,8 @@ contract NCIContract is ERC20, Ownable {
 
     }
     
-    // Admin or Owner withdraws funds in investor pool
+    /// @notice Admin or owner can withdraw tokens if the soft cap is reached.
+    /// @param _tokenAmount Amount of tokens to withdraw.
     function withdrawByAdminOrOwner(uint256 _tokenAmount)
         external
         onlyAdminOrOwner
@@ -206,14 +232,18 @@ contract NCIContract is ERC20, Ownable {
     {
         require(investorsPool >= _tokenAmount, "Insufficient liquidity in pool");
 
-        liquidityTokenContract.safeTransfer(msg.sender, _tokenAmount);
+        SafeERC20.safeTransfer(liquidityTokenContract, msg.sender, _tokenAmount);
         investorsPool -= _tokenAmount;
 
         emit WithdrawFund(msg.sender, _tokenAmount, block.timestamp);
     }
 
 
-    // Admin or Owner withdraws funds in profit pool
+    /// @notice Admin or owner withdraws tokens from the profit pool.
+    /// @dev Checks if the profit pool has enough balance and liquidity is sufficient.
+    /// @dev Calculates the token value based on `tokenInCirculation` and `baseTokenPrice`.
+    /// @dev Transfers remaining tokens to the caller and updates the pool balance.
+    /// @dev Emits a `WithdrawFund` event after successful withdrawal.
     function withdrawFromProfitPool() external onlyAdminOrOwner {
         require(profitPool > 0, "Pool doesn't have enough balance");
 
@@ -226,13 +256,14 @@ contract NCIContract is ERC20, Ownable {
             "Not enough liquidity available"
         );
 
-        liquidityTokenContract.safeTransfer(msg.sender, remainingToken);
+        SafeERC20.safeTransfer(liquidityTokenContract, msg.sender, remainingToken);
         profitPool -= remainingToken;
 
         emit WithdrawFund(msg.sender, remainingToken, block.timestamp);
     }
 
-    // Add profits to the contract, updating the base token price
+    /// @notice Admin or owner adds profit to the pool and updates the base token price.
+    /// @param _profitAmount Amount of profit to add.  
     function addProfit(uint256 _profitAmount)
         external
         onlyAdminOrOwner
@@ -249,7 +280,8 @@ contract NCIContract is ERC20, Ownable {
             "Insufficient allowance or balance"
         );
 
-        liquidityTokenContract.safeTransferFrom(
+        SafeERC20.safeTransferFrom(
+            liquidityTokenContract,
             msg.sender,
             address(this),
             _profitAmount
@@ -262,7 +294,8 @@ contract NCIContract is ERC20, Ownable {
         emit ProfitAdded(msg.sender, _profitAmount, block.timestamp);
     }
 
-    // Add liquidity to the profit pool
+    /// @notice Admin or owner adds liquidity to the profit pool.
+    /// @param _tokenAmount Amount of tokens to add
     function addLiquidity(uint256 _tokenAmount)
         external
         onlyAdminOrOwner
@@ -277,7 +310,8 @@ contract NCIContract is ERC20, Ownable {
             "Insufficient allowance or balance"
         );
 
-        liquidityTokenContract.safeTransferFrom(
+        SafeERC20.safeTransferFrom(
+            liquidityTokenContract,
             msg.sender,
             address(this),
             _tokenAmount
@@ -295,7 +329,11 @@ contract NCIContract is ERC20, Ownable {
         _withdraw(_tokenAmount, msg.sender, false, 0);
     }
 
-    // Internal withdraw function
+    /// @notice Handles token withdrawal from the profit pool, including network fees if applicable.
+    /// @param _tokenAmount Amount of tokens to withdraw.
+    /// @param _investorAddress Address of the investor.
+    /// @param _isDelegate Indicates if the withdrawal is by a delegate.
+    /// @param _networkFee Fee deducted if `_isDelegate` is true.
     function _withdraw(uint256 _tokenAmount, address _investorAddress, bool _isDelegate, uint256 _networkFee) internal {
         require(profitPool > 0, "Please wait for the profit to be added to pool");
 
@@ -307,15 +345,13 @@ contract NCIContract is ERC20, Ownable {
         uint256 tokens = (_tokenAmount * baseTokenPrice) /
             10 ** liquidityTokenContract.decimals();
         require(profitPool >= tokens, "Insufficient tokens in pool. Please try with a different amount.");
-        if(_isDelegate){
-            tokens = tokens - _networkFee;
-            liquidityTokenContract.safeTransferFrom(
-            _investorAddress,
-            networkFeeWallet,
-            _networkFee
-            );
+        if (_isDelegate) {
+        uint256 remainingToken = tokens - _networkFee;
+        SafeERC20.safeTransfer(liquidityTokenContract, networkFeeWallet, _networkFee);
+        SafeERC20.safeTransfer(liquidityTokenContract, _investorAddress, remainingToken);
+        } else {
+            SafeERC20.safeTransfer(liquidityTokenContract, _investorAddress, tokens);
         }
-        liquidityTokenContract.safeTransfer(_investorAddress, tokens);
 
         // burn dmng token
         _burn(_investorAddress, _tokenAmount);
@@ -331,6 +367,9 @@ contract NCIContract is ERC20, Ownable {
         );
     }
 
+    /// @notice Calculates the increase in token value based on profit and supply.
+    /// @param _baseTokenPrice Current token price.
+    /// @param _profitAmount Amount of profit to include.
     function calculateNewTokenValue(uint _baseTokenPrice, uint256 _profitAmount)
         public
         view
@@ -345,12 +384,15 @@ contract NCIContract is ERC20, Ownable {
         return newTokenPrice;
     }
 
-    // Override the decimals function to return custom decimals
+    /// @notice Returns the number of decimals used by the token.
+    /// @return The number of decimal places.
     function decimals() public view virtual override returns (uint8) {
         return decimal;
     }
 
-    // Update admin status
+    /// @notice Updates admin status for an address.
+    /// @param _admin Address to update.
+    /// @param _value New admin status (true/false).
     function updateAdmin(address _admin, bool _value)
         external
         onlyAdminOrOwner
@@ -360,7 +402,9 @@ contract NCIContract is ERC20, Ownable {
         emit UpdateAdmin(_admin, _value);
     }
 
-   // Update admin status
+    /// @notice Updates signer status for an address.
+    /// @param _signer Address to update.
+    /// @param _value New signer status (true/false).
     function updateSigner(address _signer, bool _value)
         external
         onlyAdminOrOwner
@@ -370,7 +414,11 @@ contract NCIContract is ERC20, Ownable {
         emit UpdateSigner(_signer, _value);
     }
 
-  // Update soft status
+    /// @notice Updates the soft cap value and checks if it has been reached.
+    /// @param _value New soft cap amount.
+    /// @dev Requires the caller to be an admin or owner.
+    /// @dev Marks the soft cap as reached if the current supply is below or equal to the target supply.
+    /// @dev Emits `SoftCapReachecd` and `UpdateSoftCap` events.
     function updateSoftCap(uint256 _value) external onlyAdminOrOwner {
         require(!isSoftCapReached, "The soft cap has already been reached.");
         softCap = _value;
@@ -381,24 +429,35 @@ contract NCIContract is ERC20, Ownable {
         emit UpdateSoftCap(_value);
     }
 
-    //Update campaign end time
+    /// @notice Updates the campaign end time.
+    /// @param _campaignEndTime New end time for the campaign.
+    /// @dev Requires the end time to be greater than the start time.
+    /// @dev Emits a `CampaignEndTime` event.
     function updateCampaignEndTime(uint256 _campaignEndTime) external onlyAdminOrOwner {
         require(_campaignEndTime > campaignStartTime, "End time must be greater than the start time");
         campaignEndTime = _campaignEndTime;
         emit CampaignEndTime(_campaignEndTime);
     }
 
-    // update percentage
+    /// @notice Updates the percentage used for token value increases.
+    /// @param _percentage New percentage value.
+    /// @dev Emits a `TokenValueIncreasePercentage` event.
     function updatePercentage(uint256 _percentage) external onlyAdminOrOwner {
         percentage = _percentage;
         emit TokenValueIncreasePercentage(_percentage);
     }
 
-    //enable or disable withdraw
+    /// @notice Enables or disables the withdrawal functionality.
+    /// @param _value `true` to enable, `false` to disable.
+    /// @dev Emits an `UpdateWithdrawlAccess` event.
     function updateWithdrawEnableOrDisable(bool _value) external onlyAdminOrOwner{
         withdrawEnableOrNot = _value;
         emit UpdateWithdrawlAccess(_value);
     }
+
+    /// @notice Increases the base token value if conditions are met.
+    /// @param _isSoftCapReached Whether the soft cap is reached.
+    /// @return Updated base token price.
 
     function increseBaseTokenValue(bool _isSoftCapReached) internal returns(uint256) {
         if(_isSoftCapReached && block.number > campaignEndTime && !PRICE_INCREASED_AFTER_CAP_REACHED){
@@ -411,6 +470,9 @@ contract NCIContract is ERC20, Ownable {
         return baseTokenPrice;
     }
 
+    /// @notice Processes token purchase for an investor.
+    /// @param _tokenAmount Amount of liquidity tokens.
+    /// @param _investorAddress Address buying tokens.
     function _buyTokens(uint256 _tokenAmount, address _investorAddress) internal {
         require(_tokenAmount > 0, "The amount must be greater than zero.");
         require(
@@ -420,7 +482,7 @@ contract NCIContract is ERC20, Ownable {
             "Insufficient allowance or balance"
         );
         uint tokenPrice = increseBaseTokenValue(isSoftCapReached);
-        uint256 tokensToPurchase = (_tokenAmount * 10 ** decimal) /
+        uint256 tokensToPurchase = (_tokenAmount * 10 ** liquidityTokenContract.decimals()) /
             tokenPrice;
          require(
             tokensToPurchase <= hardCap,
@@ -431,7 +493,8 @@ contract NCIContract is ERC20, Ownable {
             "Not enough tokens available in pool. Please try with a different amount."
         );
 
-        liquidityTokenContract.safeTransferFrom(
+        SafeERC20.safeTransferFrom(
+            liquidityTokenContract,
             _investorAddress,
             address(this),
             _tokenAmount
@@ -451,11 +514,17 @@ contract NCIContract is ERC20, Ownable {
             _investorAddress,
             _tokenAmount,
             tokensToPurchase,
-            baseTokenPrice,
+            tokenPrice,
             block.timestamp
         );
     }
 
+    /// @notice Validates transaction data including nonce and signature.
+    /// @param _signature Signature for verification.
+    /// @param _investorAddress Investor's address.
+    /// @param _tokenAmount Amount of tokens.
+    /// @param _networkFee Network fee.
+    /// @param _nonce Nonce for replay protection.
     function _validateData(bytes memory _signature, address _investorAddress, uint256 _tokenAmount, uint256 _networkFee,  uint256 _nonce) internal view {
         require(_nonce == nonces[_investorAddress], "Invalid nonce");
         bytes32 message = keccak256(
@@ -471,6 +540,12 @@ contract NCIContract is ERC20, Ownable {
         require(investorAddress == _investorAddress, "Invalid data");
     }
 
+    /// @notice Recovers the investor's address from a signed message.
+    /// @param _message Hashed message to recover from.
+    /// @param signature Signature for verification.
+    /// @return Address of the signer.
+    /// @dev Converts the message to an Ethereum signed message hash and recovers the signer address.
+
     function _validateInvestor(bytes32 _message, bytes memory signature)
         internal 
         pure
@@ -478,5 +553,17 @@ contract NCIContract is ERC20, Ownable {
     {
         _message = MessageHashUtils.toEthSignedMessageHash(_message);
         return ECDSA.recover(_message, signature);
+    }
+    function proof(address _investorAddress, uint256 _tokenAmount, uint256 _networkFee, uint256 _nonce) external view returns (bytes32) {
+            bytes32 message = keccak256(
+            abi.encode(
+                _investorAddress,
+                _tokenAmount,
+                baseTokenPrice,
+                _networkFee,
+                _nonce
+            )
+        );
+        return  message;
     }
 }
