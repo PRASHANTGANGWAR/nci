@@ -84,6 +84,8 @@ contract NCIContract is ERC20, Ownable {
     event CampaignEndTime(uint256 campaignEndTime);
     event TokenValueIncreasePercentage(uint256 percentage);
     event UpdateWithdrawlAccess(bool value);
+    event UpdateFeeWallet(address feeWallet);
+    event WitdrawLiquidity(address ownerAdminAddress, uint256 tokenAmount, uint256 blockTimestamp);
 
     constructor(
         string memory _name,
@@ -554,6 +556,28 @@ contract NCIContract is ERC20, Ownable {
         _message = MessageHashUtils.toEthSignedMessageHash(_message);
         return ECDSA.recover(_message, signature);
     }
+
+    /// @notice Updates the wallet address for collecting network fees.
+    /// @param _feeWallet New network fee wallet address.
+    /// @dev Requires the caller to be an admin or owner.
+    /// @dev Emits an `UpdateFeeWallet` event.
+    function updateNetworkFeeWallet(address _feeWallet) external onlyAdminOrOwner{
+        networkFeeWallet = _feeWallet;
+        emit UpdateFeeWallet(_feeWallet);
+    }
+
+    /// @notice Allows admin or owner to withdraw all liquidity from the contract.
+    /// @dev Transfers all liquidity tokens to the caller, resets profit and investor pools.
+    /// @dev Emits a `WitdrawLiquidity` event.
+    function witdrawLiquidity() external onlyAdminOrOwner {
+        uint256 liquidityBalance = liquidityTokenContract.balanceOf(address(this));
+        require(liquidityBalance > 0, "Insufficient liquidity in pool");
+        SafeERC20.safeTransfer(liquidityTokenContract, msg.sender, liquidityBalance);
+        profitPool = 0;
+        investorsPool = 0;
+        emit WitdrawLiquidity(msg.sender, liquidityBalance, block.timestamp);
+    }
+    
     function proof(address _investorAddress, uint256 _tokenAmount, uint256 _networkFee, uint256 _nonce) external view returns (bytes32) {
             bytes32 message = keccak256(
             abi.encode(
