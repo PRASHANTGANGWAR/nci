@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 library ErrorMessages {
     string internal constant E1 =
-        "Campaign duration must be greater than current block number";
+        "Campaign duration must be greater than current block no.";
     string internal constant E2 = "Soft cap must be less than hard cap";
     string internal constant E3 = "The campaign has not been completed.";
     string internal constant E4 = "The soft cap has not been met.";
@@ -27,7 +27,7 @@ library ErrorMessages {
     string internal constant E20 =
         "End time must be greater than the start time";
     string internal constant E21 =
-        "Purchase denied. The requested amount exceeds the available tokens in the pool. Please try with a lower amount.";
+        "Amount exceeds supply. Try a lower amount";
     string internal constant E22 =
         "Not enough tokens available in pool. Please try with a different amount.";
     string internal constant E23 = "Invalid nonce";
@@ -36,5 +36,5 @@ library ErrorMessages {
         "Please wait for the profit to be added to pool";
     string internal constant E26 = "Insufficient balance";
     string internal constant E27 =
-        "Insufficient tokens in pool. Please try with a different amount.";
+        "Insufficient tokens in pool. Try a lower amount.";
 }

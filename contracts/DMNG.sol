@@ -583,7 +583,7 @@ contract NCIContract is ERC20, Ownable {
         );
         require(
             balanceOf(address(this)) >= tokensToPurchase,
-            ErrorMessages.E22
+            ErrorMessages.E21
         );
 
         SafeERC20.safeTransferFrom(
