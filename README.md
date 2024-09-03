@@ -17,10 +17,10 @@ Create a .env file and copy the keys from the .envExample file. Paste these keys
 
 <!-- For dev -->
 ### contract deployment and vefication
-```npx hardhat ignition deploy ignition/modules/DMNG.js --network bscTestnet --verify```
+```npx hardhat ignition deploy ignition/modules/NCI.js --network bscTestnet --verify```
 
 ### contract deployment 
-```npx hardhat ignition deploy ignition/modules/DMNG.js --network bscTestnet```
+```npx hardhat ignition deploy ignition/modules/NCI.js --network bscTestnet```
 
 ### contract verfication
 After deploying the contract with hardhat, please verify the contract on tesntet using the testnet API key stored in the .env file
@@ -29,10 +29,10 @@ After deploying the contract with hardhat, please verify the contract on tesntet
 
 <!-- For Prod -->
 ### contract deployment and vefication
-```npx hardhat ignition deploy ignition/modules/DMNG.js --network mainnet --verify```
+```npx hardhat ignition deploy ignition/modules/NCI.js --network mainnet --verify```
 
 ### contract deployment 
-```npx hardhat ignition deploy ignition/modules/DMNG.js --network mainnet ```
+```npx hardhat ignition deploy ignition/modules/NCI.js --network mainnet ```
 
 ### contract verfication
 After deploying the contract with hardhat, please verify the contract on Etherscan using the Etherscan API key stored in the .env file

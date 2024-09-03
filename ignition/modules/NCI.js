@@ -1,7 +1,7 @@
 const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 require("dotenv").config({ path: __dirname + "/.env" });
 
-module.exports = buildModule("DMNGModule", (m) => {
+module.exports = buildModule("NCIModule", (m) => {
   const tokenName = m.getParameter(
     "tokenName",
     process.env.TOKEN_NAME
@@ -42,7 +42,7 @@ module.exports = buildModule("DMNGModule", (m) => {
   const networkFee = m.getParameter("networkFee", process.env.NETWORK_FEE);
 
 
-  const dmng = m.contract("NCIContract", [
+  const nci = m.contract("NCIContract", [
     tokenName,
     tokenSymbol,
     initialSupply,
@@ -57,5 +57,5 @@ module.exports = buildModule("DMNGModule", (m) => {
     networkFee
   ]);
 
-  return { dmng };
+  return { nci };
 });
