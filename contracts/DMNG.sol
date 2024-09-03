@@ -22,7 +22,6 @@ contract NCIContract is ERC20, Ownable {
     // private variables
     uint8 private decimal;
     uint256 private pricePercetnage = 100;
-    bool private  PRICE_INCREASED_AFTER_CAP_REACHED;
 
     // public variables
     uint256 public baseTokenPrice;
@@ -551,13 +550,11 @@ contract NCIContract is ERC20, Ownable {
      * @param _isSoftCapReached Indicates if the soft cap has been reached.
      * @return The updated base token price.
     */
-    function increseBaseTokenValue(bool _isSoftCapReached) internal returns(uint256) {
-        if(_isSoftCapReached && block.number > campaignEndTime && !PRICE_INCREASED_AFTER_CAP_REACHED){
+    function increseBaseTokenValue(bool _isSoftCapReached) internal view returns(uint256) {
+        if(_isSoftCapReached && block.number > campaignEndTime){
             uint256 increment = (baseTokenPrice * pricePercetnage) / 1000; 
-            baseTokenPrice += increment;
-            PRICE_INCREASED_AFTER_CAP_REACHED = true;
-            emit  BaseTokenPriceUpdated(baseTokenPrice);
-            return baseTokenPrice;
+            uint256 newtokenValue = baseTokenPrice + increment;
+            return newtokenValue;
         }
         return baseTokenPrice;
     }
