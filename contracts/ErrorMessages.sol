@@ -5,12 +5,12 @@ library ErrorMessages {
     string internal constant E1 =
         "Campaign duration must be greater than current block no.";
     string internal constant E2 = "Soft cap must be less than hard cap";
-    string internal constant E3 = "The campaign has not been completed.";
-    string internal constant E4 = "The soft cap has not been met.";
+    string internal constant E3 = "Campaign has not been completed.";
+    string internal constant E4 = "Soft cap has not been met.";
     string internal constant E5 = "Cannot buy tokens: Hard cap reached.";
     string internal constant E6 = "Withdrawals are disabled.";
     string internal constant E7 = "Only signer is allowed";
-    string internal constant E8 = "The amount must be greater than zero.";
+    string internal constant E8 = "Amount must be greater than zero.";
     string internal constant E9 =
         "Token value should be greater than network fee";
     string internal constant E10 = "Network fee exceeds token amount";
@@ -23,15 +23,15 @@ library ErrorMessages {
     string internal constant E16 = "Insufficient liquidity in pool";
     string internal constant E17 = "Admin address cannot be zero address";
     string internal constant E18 = "Signer address cannot be zero address";
-    string internal constant E19 = "The soft cap has already been reached.";
+    string internal constant E19 = "Soft cap has already been reached.";
     string internal constant E20 =
         "End time must be greater than the start time";
     string internal constant E21 =
         "Amount exceeds supply. Try a lower amount";
     string internal constant E22 =
         "Not enough tokens available in pool. Please try with a different amount.";
-    string internal constant E23 = "Invalid nonce";
-    string internal constant E24 = "Invalid data";
+    string internal constant E23 = "Invalid nonce, transaction rejected";
+    string internal constant E24 = "Signature verification failed";
     string internal constant E25 =
         "Please wait for the profit to be added to pool";
     string internal constant E26 = "Insufficient balance";
